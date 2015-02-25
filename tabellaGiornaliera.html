@@ -1,0 +1,69 @@
+<!--
+ Software for collecting data from PV energy meters
+ Copyright (C) 2014 Axel Bernardinis <abernardinis@hotmail.com>
+
+ This program is free software: you can redistribute it and/or modify
+ it under the terms of the GNU General Public License as published by
+ the Free Software Foundation, either version 3 of the License, or
+ (at your option) any later version.
+
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ GNU General Public License for more details.
+
+ You should have received a copy of the GNU General Public License
+ along with this program. If not, see <http://www.gnu.org/licenses/>.
+-->
+
+<div class="tabellaGiornaliera">
+   <h1>{{ title }}</h1>
+   <label>Selezione:</label>
+   <div class="btn-group" ng-model="selezione" ng-change="alert('gigi');" bs-radio-group>
+      <label class="btn btn-default"><input class="btn btn-default" value="singoloGiorno" type="radio" ng-change="giornoFine = maxDate;"> Singolo Giorno</label>
+      <label class="btn btn-default"><input class="btn btn-default" value="giorniMultipli" type="radio"> Giorni Multipli</label>
+   </div>
+   
+   <br/><br/>
+   
+   <div class="selezioneGiorniDiv">
+      <div>
+         <label>{{ labelGiornoInizio[selezione] }}: </label>
+         <input class="form-control" ng-model="giornoInizio" data-min-date="{{minDate}}" data-max-date="{{giornoFine}}" placeholder="{{ labelGiornoInizio[selezione] }}" data-date-format="dd/MM/yyyy" type="text" bs-datepicker>
+      </div>
+      <div ng-show="selezione=='giorniMultipli'">
+         <label>Giorno Fine: </label>
+         <input class="form-control" ng-model="giornoFine" data-min-date="{{giornoInizio}}" data-max-date="{{maxDate}}" placeholder="Giorno Fine" data-date-format="dd/MM/yyyy" type="text" bs-datepicker>
+      </div>
+      <div>
+         <input class="btn btn-default" type="submit" value="Mostra Tabella" ng-click="request();">
+         <input class="btn btn-default" type="submit" value="Nascondi Tabella" ng-click="showTabella=false;">
+      </div>
+   </div>
+
+   <br/>
+   <div ng-show="showTabella">
+      <table id="tabellaGiornaliera" class="table" ng-table="tableParams" export-csv="csv">
+         <tr ng-repeat="row in dati">
+            <td data-title="'Giorno'">
+               {{ row.giorno }}
+            </td>
+            <td data-title="'Watt'">
+               {{ row.watt }}<b>&nbsp;Wh</b>
+            </td>
+            <td data-title="'Picco Watt'">
+               {{ row.picco_watt }}<b>&nbsp;W</b>
+            </td>
+            <td data-title="'Picco Ora'">
+               {{ row.picco_ora }}
+            </td>
+            <td data-title="'Ora Inizio'">
+               {{ row.inizio }}
+            </td>
+            <td data-title="'Ora Fine'">
+               {{ row.fine }}
+            </td>
+         </tr>
+      </table>
+   </div>
+</div>

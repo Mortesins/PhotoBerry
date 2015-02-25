@@ -1,0 +1,69 @@
+<!--
+ Software for collecting data from PV energy meters
+ Copyright (C) 2014 Axel Bernardinis <abernardinis@hotmail.com>
+
+ This program is free software: you can redistribute it and/or modify
+ it under the terms of the GNU General Public License as published by
+ the Free Software Foundation, either version 3 of the License, or
+ (at your option) any later version.
+
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ GNU General Public License for more details.
+
+ You should have received a copy of the GNU General Public License
+ along with this program. If not, see <http://www.gnu.org/licenses/>.
+-->
+
+<div class="tabellaMensile">
+   <h1>{{ title }}</h1>
+   <div class="selezioneMesiDiv"><!--</div>id="selezioneMese">-->
+      <label>Anno Inizio:</label>
+      <div class="select">
+         <select ng-model="annoInizio" ng-options="a.anno as a.anno for a in anniMesi" ng-change="cambiaMesiSelezionabili('inizio');cambiatoAnnoInizio();" bs-select></select> 
+      </div>
+      <label>Mese Inizio:</label>
+      <div class="select">
+         <select ng-model="meseInizio" ng-options="a for a in mesiSelezionabiliInizio" ng-change="cambiatoMeseInizio();" bs-select></select> 
+      </div>
+      <label>Anno Fine:</label>
+      <div class="select">
+         <select ng-model="annoFine" ng-options="a.anno as a.anno for a in anniMesi" ng-change="cambiaMesiSelezionabili('fine');cambiatoAnnoFine();" bs-select></select> 
+      </div>
+      <label>Mese Fine:</label>
+      <div class="select">
+         <select ng-model="meseFine" ng-options="a for a in mesiSelezionabiliFine" ng-change="cambiatoMeseFine();" bs-select></select> 
+      </div>
+      <input class="btn btn-default" type="submit" value="Mostra Tabella" ng-click="request();">
+      <input class="btn btn-default" type="submit" value="Nascondi Tabella" ng-click="showTabella=false;">
+   </div>
+   <br/>
+   <div ng-show="showTabella">
+      <table id="tabellaMensile" class="table" ng-table="tableParams" export-csv="csv">
+         <tr ng-repeat="row in dati">
+            <td data-title="'Anno'">
+               {{ row.anno }}
+            </td>
+            <td data-title="'Mese'">
+               {{ row.mese }}
+            </td>
+            <td data-title="'Watt'">
+               {{ row.watt }}<b>&nbsp;Wh</b>
+            </td>
+            <td data-title="'Giornata Produzione Massima'">
+               {{ row.giornata_max_giorno }}
+            </td>
+            <td data-title="'Giornata Produzione Massima Watt'">
+               {{ row.giornata_max_watt }}<b>&nbsp;Wh</b>
+            </td>
+            <td data-title="'Giornata Potenza Massima'">
+               {{ row.picco_max_giorno }}
+            </td>
+            <td data-title="'Giornata Potenza Massima Watt'">
+               {{ row.picco_max_watt }}<b>&nbsp;W</b>
+            </td>
+         </tr>
+      </table>
+   </div>
+</div>

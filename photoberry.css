@@ -1,0 +1,233 @@
+/***
+ Software for collecting data from PV energy meters
+ Copyright (C) 2014 Axel Bernardinis <abernardinis@hotmail.com>
+
+ This program is free software: you can redistribute it and/or modify
+ it under the terms of the GNU General Public License as published by
+ the Free Software Foundation, either version 3 of the License, or
+ (at your option) any later version.
+
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ GNU General Public License for more details.
+
+ You should have received a copy of the GNU General Public License
+ along with this program. If not, see <http://www.gnu.org/licenses/>.
+***/
+
+
+body {
+   padding-top:75px;
+   padding-left:15px;
+   padding-right:10px;
+}
+
+/*** NAVBAR ***/
+.navbar div {
+   height:70px;
+}
+
+.navbar-brand img{
+   position:absolute;
+   top:10px;
+   left:15px;
+   height:50px;
+}
+
+div.navbar-nav-div {
+   position:absolute;
+   top:10px;
+   padding-left:150px;
+}
+/**************/
+
+/*** MENSILE ***/
+.selezioneMesiDiv .select{
+   display:inline;
+   padding-right:5px;
+}
+
+.selezioneMesiDiv label {
+   padding-right:5px;
+}
+
+.table td {
+   text-align:center;
+}
+/**************/
+
+/*** GIORNALIERO ***/
+.selezioneGiorniDiv div{
+   display:inline;
+   padding-right:10px;
+}
+
+.selezioneGiorniDiv input{
+   display:inline;
+}
+
+.selezioneGiorniDiv input[type="text"]{
+   display:inline;
+   width:200px;
+}
+
+.selezioneGiorniDiv label {
+   display:inline;
+   padding-right:5px;
+}
+/***************************/
+
+/*** GRAFICO GIORNALIERO ***/
+.axis path,
+.axis line {
+  fill: none;
+  stroke: #000;
+  shape-rendering: crispEdges;
+}
+
+.x.axis path {
+  display: none;
+}
+
+.y.axis .text {
+   font-size:16px;
+}
+
+#barGraphProduzione .bar {
+  fill: orange;
+}
+
+#barGraphPotenza .bar {
+  fill: green;
+}
+
+#barGraphProduzione .bar:hover,
+#barGraphPotenza .bar:hover {
+  fill: orangered ;
+}
+
+.barGraphTitle {
+   font-size:26px;  
+}
+/**********/
+
+/*** GRAFICO POTENZA ***/
+.data-line {
+	stroke: steelblue;
+	stroke-width: 2;
+	fill: none;
+	stroke-dasharray: 0;
+}
+
+path {
+	stroke: #eee;
+	stroke-width: 2;
+	stroke-dasharray: 0;
+	fill: none;
+}
+
+.area {
+  	fill: lightsteelblue;
+}
+
+text {
+	font-family: Arial;
+	font-size: 8pt;
+	fill: #787878;
+}
+
+line {
+	stroke: #CDCDCD;
+	stroke-width: 0.5;
+	/* stroke-dasharray: 3 3; */
+	fill: none;
+}
+
+.data-point {
+	stroke: steelblue;
+	stroke-width: 2;
+	fill: #FFF;
+}
+
+#lineGraphPotenza {
+   margin: 0;
+}
+   /* mie */
+.lineGraphTitle {
+   font-size:26px;  
+}
+
+.yAxisText {
+   font-size:18px;
+}
+   /******/
+/***********************/
+
+/*** ISTANTANEO ***/
+.graficoIstantaneo .istantaneoBarra {
+   height: 30px;
+   background-color: green;
+}
+
+.graficoIstantaneo .istantaneoLabel,
+.graficoIstantaneo .istantaneoBarraContornoLabel {
+   font-size: 18px;
+   text-align: right;
+}
+
+.graficoIstantaneo .istantaneoBarraContorno {
+   border:solid black 3px;
+}
+/******************/
+
+/*** D3 tip ***/
+.d3-tip {
+  line-height: 1;
+  font-weight: bold;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.8);
+  color: #fff;
+  border-radius: 2px;
+}
+
+/* Creates a small triangle extender for the tooltip */
+.d3-tip:after {
+  box-sizing: border-box;
+  display: inline;
+  font-size: 10px;
+  width: 100%;
+  line-height: 1;
+  color: rgba(0, 0, 0, 0.8);
+  content: "\25BC";
+  position: absolute;
+  text-align: center;
+}
+
+/* Style northward tooltips differently */
+.d3-tip.n:after {
+  margin: -1px 0 0 0;
+  top: 100%;
+  left: 0;
+}
+/**************/
+
+
+/*** TABELLA MENSILE ***
+#selezioneMese .select{
+   display:inline;
+   padding-right:5px;
+}
+
+#selezioneMese label {
+   padding-right:5px;
+}
+
+#tabellaMensile td {
+   text-align:center;
+}
+***********************/
+
+/*** GRAFICO GIORNALIERO ***/
+
+/**************************/

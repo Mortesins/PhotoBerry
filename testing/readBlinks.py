@@ -47,6 +47,9 @@ class BlinkManager:
     def addFallingCallback(self, callback):
         self._addCallback(callback, 0)
 
+    def addRisingCallback(self, callback):
+        self._addCallback(callback, 1)
+
     def _removeCallback(self, callback, i):
         self.callback_lock.acquire()
         self.callbacks[i].remove(callback)
@@ -55,8 +58,14 @@ class BlinkManager:
     def removeFallingCallback(self, callback):
         self._removeCallback(callback, 0)
 
+    def removeRisingCallback(self, callback):
+        self._removeCallback(callback, 1)
+
     def waitForFalling(self):
         self.events[0].wait()
+
+    def waitForRising(self):
+        self.events[1].wait()
 
 
 def foo():

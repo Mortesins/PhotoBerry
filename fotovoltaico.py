@@ -18,18 +18,9 @@
 ########################################################################
 
 """
-    Legge la lucetta del contatore dei fotovoltaici e crea un database
-    VERSION : 4.4 (RPi.GPIO v0.5.8 required)
-        -4 thread:
-            -main: manageGPIO
-                -insertValues (daemon of manageGPIO)
-                -readLED (run on event detect)
-            -instant: HTTPD
-        -channel 16
-        -queue empty exception
-        -mail sempre global parameter
-        -importabile così si può usare updateDatabase nel webServer
-        BUG FIX: global SPENTO in do_get
+    Read the LED of the PV system power meter and store energy production data in a database
+    VERSION : 6.0 (RPi.GPIO v0.5.8 required)
+        -Split code in modules to make it testable
 """
 import logging
 import subprocess
@@ -41,18 +32,19 @@ from queue import Empty, Queue
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from db_manager import updateDatabase, inserisciDatabase
+from config import HOME, EMAIL
 
+TEST = True
 
-LOGGING_LEVEL = logging.INFO
+LOGGING_LEVEL = logging.INFO if not TEST else logging.DEBUG
 LOGGING_FORMAT = '[%(levelname)s %(asctime)s] %(message)s'
 LOGGING_DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
-HOME = '/home/pi'
-EMAIL = 'axelbernardinis@gmail.com'
 MAILSEMPRE = True
 
-CHANNEL = 16 #GPIO pin for input signal
-BOUNCETIME = 20#50#500
+CHANNEL = 16  #GPIO pin for input signal
+BOUNCETIME = 20  #50#500
+LIGHT_READER = None
+DB_MANAGER = None
 
 QUEUE = Queue()
 SPENTO = Event()
@@ -63,7 +55,7 @@ HTTPD = None  # Server object as global so I can stop it
 ORAULTLAMP = datetime(1970,1,1) # ora ultimo lampeggio per la potenza istantanea, senza lock perchè tanto unico thread
 
 
-class RequestHandler (BaseHTTPRequestHandler):
+class RequestHandler(BaseHTTPRequestHandler):
     port = 8001
     address = ('', port)
     def do_GET(self):
@@ -115,9 +107,12 @@ class RequestHandler (BaseHTTPRequestHandler):
             # nomefunzione({JSONOBJECT});
             # nomefunzione deve essere il parametro callback="stringanomefuzione"
         try:
-            self.wfile.write(str(parameters['callback'][0]) + '({"potenza":'+str(potenza)+'});')
+            parameter_name = str(parameters['callback'][0])
         except KeyError:
-            self.wfile.write('potenza({"potenza":'+str(potenza)+'});')
+            parameter_name = 'potenza'
+        response_string = parameter_name + '({"potenza":'+str(potenza)+'});'
+        self.wfile.write(response_string.encode('utf-8'))
+
 
 
 def instantServer():
@@ -133,7 +128,7 @@ def insertValues(metaGiornata=False):
     # inserisci singolo
         logging.info("inserimento singolo perche' e' appena partito")
         inserimento = 'insert into potenza(GIORNO, ORA, WATT, PICCO_WATT, PICCO_ORA) values (curdate(), curtime(), 1, 0, curtime())'
-        inserisciDatabase(inserimento)
+        DB_MANAGER.inserisciDatabase(inserimento)
     # sleep until 5 minuti 'puliti'
         logging.info('First run, extra sleep. insert values: ' + str(datetime.now()))
         sleep(secondsUntilNext5min())
@@ -176,7 +171,7 @@ def insertValues(metaGiornata=False):
             else:
                 inserimento = "insert into potenza(GIORNO, ORA, WATT, PICCO_WATT, PICCO_ORA) values (curdate(),'%s', %d, %d, '%s')" % (oraInserimento.strftime('%H:%M:%S'), watt, round(maxPotenza), oraMax.strftime('%H:%M:%S'))
             logging.info('inserisco')
-            inserisciDatabase(inserimento)
+            DB_MANAGER.inserisciDatabase(inserimento)
     # sleep until 5 min
         logging.info('aspetto i prossimi 5 minuti')
         #sleep(5) # per non beccare gli stessi 5 min
@@ -214,9 +209,11 @@ def readLED(channel): # parametro voluto da GPIO
     timeToEnd = oraLampeggio + timedelta(seconds=10)
 # while fino a ora lampeggio + 1 secondo (se gira per più di 10 secondi allora la luce è accesa per un secondo di fila e quindi l'impianto è spento
     while (datetime.now() < timeToEnd):
-        led = not bool(GPIO.input(CHANNEL)) # NOT perchè il circuito è tale da avere voltaggio basso per luce accesa
+        #logging.debug('Before reading light')
+        led = LIGHT_READER.isLightOn()
+        #logging.debug('After reading light %s', led)
     # se LED spento
-        if (led == False): # perchè è più semplice da leggere, spegnendosi significa che ha lampeggiato
+        if not led: # perchè è più semplice da leggere, spegnendosi significa che ha lampeggiato
         # inserisco l'ora nella QUEUE
             logging.info('spento quindi ha lampeggiato')
             QUEUE.put_nowait(oraLampeggio)
@@ -235,110 +232,101 @@ def readLED(channel): # parametro voluto da GPIO
 
 
 def manageGPIO(mailSempre=False):
-    try:
-        global CHANNEL,BOUNCETIME
-        logging.info('manage gpio')
-        GPIO.setmode(GPIO.BOARD)
-        GPIO.setup(CHANNEL, GPIO.IN) # ingresso fototransistor
-    #Impianto acceso?
-        led1 = not bool(GPIO.input(CHANNEL)) #NOT perchè il circuito è tale da avere voltaggio basso per luce accesa: acceso -> false
-        logging.info('LED: '+str(led1))
-        sleep(1)
-        led2 = not bool(GPIO.input(CHANNEL))
-        logging.info('LED: '+str(led2))
+    logging.info('manage gpio')
+#Impianto acceso?
+    led1 = LIGHT_READER.isLightOn()
+    logging.info('LED: '+str(led1))
+    sleep(1)
+    led2 = LIGHT_READER.isLightOn()
+    logging.info('LED: '+str(led2))
 
-        if (led1 and led2): #se luce accesa significa impianto SPENTO
-            logging.info('Spento')
-            LOCK_SPENTO.acquire()
-            SPENTO.set() #= TRUE
-            LOCK_SPENTO.release()
-        else: #luce spenta, quindi impianto ACCESO
-            logging.info('Acceso')
-            LOCK_SPENTO.acquire()
-            SPENTO.clear() #= FALSE
-            LOCK_SPENTO.release()
-        #setup event detect
-            logging.info('add event')
-            GPIO.add_event_detect(CHANNEL, GPIO.FALLING, callback=readLED, bouncetime=BOUNCETIME) #falling significa 0 e quindi il led si accende
-        #setup insertValues metaGiornata = True
-            logging.info('faccio partire thread insert values')
-            threadInsertValues = Thread(target=insertValues,args=(True,))
-            threadInsertValues.daemon = True #così muore assieme a manageGPIO
-            threadInsertValues.start()
-        #sleep until spento
-            logging.info("aspetto che si spenga l'impianto")
-            SPENTO.wait() #sfrutto l'oggetto EVENT
-        #SPENTO
-            logging.info('SPENTO: sleep(3)')
-            sleep(3) # aspetto che esca da ReadLED
-            logging.info('tolgo interrupt')
-            ## SINCRONIZZARE INSERT VALUES ???
-            GPIO.remove_event_detect(CHANNEL)
-            logging.info('chiama funzione serale')
-            wattProdotti = updateDatabase()
-            logging.info('Prodotti: '+str(wattProdotti))
-            if mailSempre:
-                mail = inviaMail(wattProdotti)
-                if (mail != 0):
-                    logging.info('Errore: Mail NON inviata')
-                else:
-                    logging.info('Mail inviata')
-            elif (wattProdotti == 0):
-                mail = inviaMail(wattProdotti)
-                if (mail != 0):
-                    logging.info('Errore: Mail NON inviata')
-                else:
-                    logging.info('Mail inviata')
-
+    if (led1 and led2): #se luce accesa significa impianto SPENTO
+        logging.info('Spento')
+        LOCK_SPENTO.acquire()
+        SPENTO.set() #= TRUE
+        LOCK_SPENTO.release()
+    else: #luce spenta, quindi impianto ACCESO
+        logging.info('Acceso')
+        LOCK_SPENTO.acquire()
+        SPENTO.clear() #= FALSE
+        LOCK_SPENTO.release()
+    #setup event detect
+        logging.info('add event')
+        LIGHT_READER.addCallbackLightOn(readLED, BOUNCETIME)
+    #setup insertValues metaGiornata = True
+        logging.info('faccio partire thread insert values')
+        threadInsertValues = Thread(target=insertValues, args=(True,))
+        threadInsertValues.daemon = True #così muore assieme a manageGPIO
+        threadInsertValues.start()
+    #sleep until spento
+        logging.info("aspetto che si spenga l'impianto")
+        SPENTO.wait() #sfrutto l'oggetto EVENT
     #SPENTO
-        while (True):
-        #wait for edge
-            logging.info('Aspetto che si spenga la luce')
-            GPIO.wait_for_edge(CHANNEL, GPIO.RISING) #aspetto che ledN sia True quindi si spenga
-        # siamo la mattina dopo ed è ripartito
-            #logging.info('remove event detect' # testing, teoricamente non dovrebbe servire E INVECE
-            GPIO.remove_event_detect(CHANNEL) # testing, teoricamente non dovrebbe servire E INVECE
-        # set ACCESO
-            logging.info('Luce spenta, impianto acceso')
-            LOCK_SPENTO.acquire()
-            SPENTO.clear() # = FALSE (quindi acceso)
-            LOCK_SPENTO.release()
-        # launch insert values
-            logging.info('faccio partire thread insert values')
-            threadInsertValues = Thread(target=insertValues)
-            threadInsertValues.daemon = True #così muore assieme a manageGPIO
-            threadInsertValues.start() # è lui che fa il primo inserimento
-        #setup event detect
-            logging.info('add event')
-            GPIO.add_event_detect(CHANNEL, GPIO.FALLING, callback=readLED, bouncetime=BOUNCETIME) #falling significa 0 e quindi il led si accende
-        #sleep until spento
-            logging.info("aspetto che si spenga l'impianto")
-            SPENTO.wait() #sfrutto l'oggetto EVENT
-        #SPENTO
-            logging.info('SPENTO: tolgo interrupt')
-            sleep(3) # aspetto che esca da ReadLED
-            ## SINCRONIZZARE INSERT VALUES???
-            GPIO.remove_event_detect(CHANNEL)
-            logging.info('chiama funzione serale')
-            wattProdotti = updateDatabase()
-            logging.info('Prodotti: '+str(wattProdotti))
-            if mailSempre:
-                mail = inviaMail(wattProdotti)
-                if (mail != 0):
-                    logging.info('Errore: Mail NON inviata')
-                else:
-                    logging.info('Mail inviata')
-            elif (wattProdotti == 0):
-                mail = inviaMail(wattProdotti)
-                if (mail != 0):
-                    logging.info('Errore: Mail NON inviata')
-                else:
-                    logging.info('Mail inviata')
+        logging.info('SPENTO: sleep(3)')
+        sleep(3) # aspetto che esca da ReadLED
+        logging.info('tolgo interrupt')
+        ## SINCRONIZZARE INSERT VALUES ???
+        LIGHT_READER.removeCallback()
+        logging.info('chiama funzione serale')
+        wattProdotti = DB_MANAGER.updateDatabase()
+        logging.info('Prodotti: '+str(wattProdotti))
+        if mailSempre:
+            mail = inviaMail(wattProdotti)
+            if (mail != 0):
+                logging.info('Errore: Mail NON inviata')
+            else:
+                logging.info('Mail inviata')
+        elif (wattProdotti == 0):
+            mail = inviaMail(wattProdotti)
+            if (mail != 0):
+                logging.info('Errore: Mail NON inviata')
+            else:
+                logging.info('Mail inviata')
 
-    except KeyboardInterrupt:
-        logging.info('keyboard interrupt')
-        GPIO.cleanup()
-        return
+#SPENTO
+    while (True):
+    #wait for edge
+        logging.info('Aspetto che si spenga la luce')
+        LIGHT_READER.waitForLightOff()
+    # siamo la mattina dopo ed è ripartito
+        #logging.info('remove event detect' # testing, teoricamente non dovrebbe servire E INVECE
+        LIGHT_READER.removeCallback() # testing, teoricamente non dovrebbe servire E INVECE
+    # set ACCESO
+        logging.info('Luce spenta, impianto acceso')
+        LOCK_SPENTO.acquire()
+        SPENTO.clear() # = FALSE (quindi acceso)
+        LOCK_SPENTO.release()
+    # launch insert values
+        logging.info('faccio partire thread insert values')
+        threadInsertValues = Thread(target=insertValues)
+        threadInsertValues.daemon = True #così muore assieme a manageGPIO
+        threadInsertValues.start() # è lui che fa il primo inserimento
+    #setup event detect
+        logging.info('add event')
+        LIGHT_READER.addCallbackLightOn(readLED, BOUNCETIME)
+    #sleep until spento
+        logging.info("aspetto che si spenga l'impianto")
+        SPENTO.wait() #sfrutto l'oggetto EVENT
+    #SPENTO
+        logging.info('SPENTO: tolgo interrupt')
+        sleep(3) # aspetto che esca da ReadLED
+        ## SINCRONIZZARE INSERT VALUES???
+        LIGHT_READER.removeCallback()
+        logging.info('chiama funzione serale')
+        wattProdotti = DB_MANAGER.updateDatabase()
+        logging.info('Prodotti: '+str(wattProdotti))
+        if mailSempre:
+            mail = inviaMail(wattProdotti)
+            if (mail != 0):
+                logging.info('Errore: Mail NON inviata')
+            else:
+                logging.info('Mail inviata')
+        elif (wattProdotti == 0):
+            mail = inviaMail(wattProdotti)
+            if (mail != 0):
+                logging.info('Errore: Mail NON inviata')
+            else:
+                logging.info('Mail inviata')
 
 
 def inviaMail(wattProdotti):
@@ -352,19 +340,40 @@ def inviaMail(wattProdotti):
     return 2*statusForm + statusMail
 
 
-if __name__ == '__main__':
+def setup():
+    global HTTPD, LIGHT_READER, DB_MANAGER
     logging.basicConfig(level=LOGGING_LEVEL, format=LOGGING_FORMAT, datefmt=LOGGING_DATE_FORMAT)
     HTTPD = HTTPServer(RequestHandler.address, RequestHandler)
-    try:
-        import RPi.GPIO as GPIO
-    except:
-        logging.error('No root privileges.\nSkipping RPi.GPIO import')
+    if not TEST:
+        import db_manager
+        from light_reader import LightReader
+        LIGHT_READER = LightReader(CHANNEL)
+        DB_MANAGER = db_manager
+    else:
+        logging.debug('sleep(secondsUntilNext5min())')
+        sleep(secondsUntilNext5min())
+        import testing.db_manager_mock
+        from testing.light_reader_mock import LightReaderMock
+        LIGHT_READER = LightReaderMock(CHANNEL)
+        DB_MANAGER = testing.db_manager_mock
+
+
+def run():
     try:
         threadInstant = Thread(target=instantServer)
         threadInstant.start()
         manageGPIO(mailSempre=MAILSEMPRE)
     except KeyboardInterrupt:
         logging.info('keyboard interrupt')
-        GPIO.cleanup()
+    finally:
+        LIGHT_READER.cleanup()
         HTTPD.shutdown()  # Kills threadInstant
 
+
+def main():
+    setup()
+    run()
+
+
+if __name__ == '__main__':
+    main()

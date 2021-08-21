@@ -25,11 +25,10 @@
         GIORNO          WATT     PICCO_WATT     PICCO_ORA  INIZIO (produzione)  FINE (produzione)
         (prodotti)
 """
+import logging
 import MySQLdb
 
-USER = 'pi'
-PASSWD = 'raspberry'
-DATABASE = 'fotov'
+from config import USER, PASSWD, DATABASE
 
 
 def inserisciDatabase(inserimento):
@@ -53,33 +52,33 @@ def updateDatabase():
             (prodotti)
 
     """
-    print "updateDatabase"
-    db = MySQLdb.connect(host="localhost", user=USER, passwd=PASSWD, db=DATABASE)
+    logging.info('updateDatabase')
+    db = MySQLdb.connect(host='localhost', user=USER, passwd=PASSWD, db=DATABASE)
     c = db.cursor()
-    print "connected"
+    logging.info('connected')
 
     #### nel caso in cui si spegne a mezza giornata e poi riparte, eliminare quelle vecchie
-    c.execute("DELETE FROM giornaliero WHERE giorno=curdate()") # numero entries con il giorno di oggi
+    c.execute('DELETE FROM giornaliero WHERE giorno=curdate()') # numero entries con il giorno di oggi
     ####
 
     # creare ed assegnare: data, WATT, inzio, fine, picco_ora, picco_WATT
-    data = "2013-08-05" #data
+    data = '2013-08-05' #data
     watt = 0 # float [Wh]
-    inizio = "07:04:02:333" # ora
-    fine = "20:02:45:977" # ora
-    picco_ora = "13:52:30:232" # ora
+    inizio = '07:04:02:333' # ora
+    fine = '20:02:45:977' # ora
+    picco_ora = '13:52:30:232' # ora
     picco_watt = 2763.3 # float [W]
     # calcolo variabili
         # DATA: prendo la data dell'ultimo lampeggio
 
-    c.execute("SELECT giorno FROM potenza ORDER BY giorno DESC LIMIT 1") #seleziona la data ultima entry
+    c.execute('SELECT giorno FROM potenza ORDER BY giorno DESC LIMIT 1') #seleziona la data ultima entry
     try:
         dataUltimoLampeggio = (c.fetchone())[0]
-    except TypeError, e:
-        print "Empty database, no update done"
+    except TypeError as e:
+        logging.info('Empty database, no update done')
         return 0
 
-    print dataUltimoLampeggio
+    logging.info(dataUltimoLampeggio)
     data = dataUltimoLampeggio
         #INIZIO
         #inizio = ora primo lampeggio con data=dataUltimoLampeggio
@@ -94,7 +93,7 @@ def updateDatabase():
         #FINE
         #fine = ora dell'ultimo lampeggio
     fine = (entriesList[len(entriesList)-1])[0]
-    print inizio,fine
+    logging.info('%s %s', inizio, fine)
 
         #WATT
         #sommo WATT di ogni entry con data = dataUltimoLampeggio
@@ -104,9 +103,9 @@ def updateDatabase():
         try:
             wattEntry = (c.fetchone())[0]
             watt += int(wattEntry)
-        except TypeError, e:
+        except TypeError as e:
             break
-    print "watt: ",watt
+    logging.info('watt: %s', watt)
         #PICCO
         #picco_ora = ora primo lampeggio
     c.execute("SELECT picco_watt,picco_ora FROM potenza WHERE giorno = '%s'" % data)
@@ -122,8 +121,8 @@ def updateDatabase():
     ###
     try:
         c.execute("INSERT INTO giornaliero VALUES('%s','%d','%d','%s','%s','%s')" % (data,watt,picco_watt,picco_ora,inizio,fine))
-    except MySQLdb.Error, exception:
-        print "Something went wrong:", exception
+    except MySQLdb.Error as exception:
+        logging.info('Something went wrong: %s', exception)
 
     db.commit()
     db.close()

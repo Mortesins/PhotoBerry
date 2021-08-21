@@ -19,7 +19,7 @@
 import logging
 
 
-def inserisciDatabase(inserimento):
+def insertDatabase(inserimento):
     logging.info(inserimento)
 
 

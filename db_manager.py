@@ -31,7 +31,7 @@ import MySQLdb
 from config import USER, PASSWD, DATABASE
 
 
-def inserisciDatabase(inserimento):
+def insertDatabase(inserimento):
     db = MySQLdb.connect(host='localhost', user=USER, passwd=PASSWD, db=DATABASE)
     cursore = db.cursor()
     cursore.execute(inserimento)

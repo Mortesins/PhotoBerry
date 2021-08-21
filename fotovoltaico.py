@@ -39,60 +39,51 @@ TEST = True
 LOGGING_LEVEL = logging.INFO if not TEST else logging.DEBUG
 LOGGING_FORMAT = '[%(levelname)s %(asctime)s] %(message)s'
 LOGGING_DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
-MAILSEMPRE = True
 
 CHANNEL = 16  #GPIO pin for input signal
 BOUNCETIME = 20  #50#500
 LIGHT_READER = None
 DB_MANAGER = None
+TIMEOUT = 360  # If more than 360 seconds between blinks then PV system is off
 
 QUEUE = Queue()
-SPENTO = Event()
-LOCK_SPENTO = Lock()
-
 QUEUE_IST = Queue()
 HTTPD = None  # Server object as global so I can stop it
-ORAULTLAMP = datetime(1970,1,1) # ora ultimo lampeggio per la potenza istantanea, senza lock perchè tanto unico thread
+ORAULTLAMP = datetime(1970,1,1)  # Last blink time needed for instantaneous power, used by one thread so no lock
 
 
 class RequestHandler(BaseHTTPRequestHandler):
     port = 8001
     address = ('', port)
     def do_GET(self):
-        global QUEUE_IST, ORAULTLAMP, LOCK_SPENTO
-        LOCK_SPENTO.acquire()
-        spento = SPENTO.isSet()
-        LOCK_SPENTO.release()
+        global QUEUE_IST, ORAULTLAMP
         potenza = 0
-        if (spento):
-            potenza = -1
+        if (QUEUE_IST.qsize() == 2):
+            logging.debug('Queue size == 2')
+            t1 = QUEUE_IST.get() # sono sicuro ci sono quindi niente timeout
+            t2 = QUEUE_IST.get() # sono sicuro ci sono quindi niente timeout
         else:
-            if (QUEUE_IST.qsize() == 2):
-                logging.debug('Queue size == 2')
-                t1 = QUEUE_IST.get() # sono sicuro ci sono quindi niente timeout
-                t2 = QUEUE_IST.get() # sono sicuro ci sono quindi niente timeout
-            else:
-                logging.debug('Queue size != 2')
-                try:
-                    giaLampeggiato = (ORAULTLAMP.date() == datetime.now().date()) # controlla la data
-                except NameError: # cioe' ORAULTLAMP not defined
-                    logging.debug('NameError')
-                    giaLampeggiato = False
-                logging.debug('Already blinked: %s', giaLampeggiato)
-                try:
-                    if (giaLampeggiato):
-                        t1 = ORAULTLAMP
-                        t2 = QUEUE_IST.get(timeout=360) # sarebbe 10 watt allora impianto spento
-                    else: # non ha gia lampeggiato
-                        t1 = QUEUE_IST.get(timeout=360) # sarebbe 10 watt allora impianto spento
-                        t2 = QUEUE_IST.get(timeout=360) # molto improbabile
-                except Empty:
-                    logging.debug('Timeout, empty queue')
-                    potenza = -1
+            logging.debug('Queue size != 2')
+            try:
+                giaLampeggiato = (ORAULTLAMP.date() == datetime.now().date()) # controlla la data
+            except NameError: # cioe' ORAULTLAMP not defined
+                logging.debug('NameError')
+                giaLampeggiato = False
+            logging.debug('Already blinked: %s', giaLampeggiato)
+            try:
+                if (giaLampeggiato):
+                    t1 = ORAULTLAMP
+                    t2 = QUEUE_IST.get(timeout=TIMEOUT)  # would be 10 watt so PV system is off
+                else: # non ha gia lampeggiato
+                    t1 = QUEUE_IST.get(timeout=TIMEOUT)  # would be 10 watt so PV system is off
+                    t2 = QUEUE_IST.get(timeout=TIMEOUT)  # very unlikely. Maybe not needed?
+            except Empty:
+                logging.debug('Timeout, empty queue')
+                potenza = -1
 
         if (potenza != -1):
             timeDifference = t2 - t1
-            potenza = 3600/( timeDifference.seconds + timeDifference.microseconds*0.000001 ) # microseconds 10^-6
+            potenza = 3600/(timeDifference.seconds + timeDifference.microseconds*0.000001)  # microseconds 10^-6
             ORAULTLAMP = t2
             logging.info('Power: %s LastBlinkTime: %s', potenza, ORAULTLAMP)
         potenza = int(round(potenza))
@@ -121,221 +112,109 @@ def instantServer():
     logging.info('Server closed')
 
 
-def insertValues(metaGiornata=False):
-    global QUEUE, SPENTO, LOCK_SPENTO
-    logging.info('insertValues')
-    if (not metaGiornata):
-    # inserisci singolo
-        logging.info("inserimento singolo perche' e' appena partito")
-        inserimento = 'insert into potenza(GIORNO, ORA, WATT, PICCO_WATT, PICCO_ORA) values (curdate(), curtime(), 1, 0, curtime())'
-        DB_MANAGER.inserisciDatabase(inserimento)
-    # sleep until 5 minuti 'puliti'
-        logging.info('First run, extra sleep. insert values: ' + str(datetime.now()))
-        sleep(secondsUntilNext5min())
-
-# sleep until 5 minuti 'puliti'
-    logging.info('insert values: ' + str(datetime.now()))
-    #sleep(5) # per non beccare lo stesso 5 min
+def insertValues():
+    global QUEUE
+    lastBlinkTime = datetime.now()
+    logging.info('Insert values, just started, so extra wait for next clean 5 minutes')
     sleep(secondsUntilNext5min())
-    oraInserimento = datetime.now()
-    logging.info('insert values: ' + str(oraInserimento))
-    oraInserimento = oraInserimento + timedelta(seconds=1) # per essere sicuro di avere i 5 minuti e non 4 minuti e 99
-    oraInserimento = oraInserimento.replace(second = 0,microsecond = 0) # per avere database pulito
 
-    LOCK_SPENTO.acquire()
-    spento = SPENTO.isSet() # variabile locale
-    LOCK_SPENTO.release()
-    logging.info('Spento: '+str(spento))
-
-    while (not spento):
-    #insert values
-    #dalla queue leggi (watt, maxPotenza, oraMax, oraUltLamp)
-        logging.info("se l'impianto non e' spento")
-        oraLampeggi = list()
-        while (not QUEUE.empty()):
-            oraLampeggi.append(QUEUE.get_nowait())
-        watt = len(oraLampeggi)
-        if (watt != 0):
-            oraUltLamp = oraLampeggi[len(oraLampeggi)-1]
-            maxPotenza = 0
-            indexMaxPotenza = 0
-            for i in range(1,len(oraLampeggi)):
-                timeDifference = (oraLampeggi[i] - oraLampeggi[i-1]) # differenza tra i due lampeggi, <type timedelta>
-                potenzaIstantanea = 3600/( timeDifference.seconds + timeDifference.microseconds*0.000001 ) # microseconds 10^-6
-                if (potenzaIstantanea > maxPotenza):
-                    maxPotenza = potenzaIstantanea
-                    indexMaxPotenza = i
-            oraMax = oraLampeggi[indexMaxPotenza]
-            if (watt == 1 or watt == 2):
-                inserimento = "insert into potenza(GIORNO, ORA, WATT, PICCO_WATT, PICCO_ORA) values (curdate(),'%s', %d, %d, '%s')" % (oraUltLamp.strftime('%H:%M:%S'), watt, round(maxPotenza), oraMax.strftime('%H:%M:%S')) # per avere l'ora di fine giornata
-            else:
-                inserimento = "insert into potenza(GIORNO, ORA, WATT, PICCO_WATT, PICCO_ORA) values (curdate(),'%s', %d, %d, '%s')" % (oraInserimento.strftime('%H:%M:%S'), watt, round(maxPotenza), oraMax.strftime('%H:%M:%S'))
-            logging.info('inserisco')
-            DB_MANAGER.inserisciDatabase(inserimento)
-    # sleep until 5 min
-        logging.info('aspetto i prossimi 5 minuti')
-        #sleep(5) # per non beccare gli stessi 5 min
+    while True:
+        logging.info('Insert values, wait for next clean 5 minutes')
         sleep(secondsUntilNext5min())
-        oraInserimento = datetime.now()
-        logging.info('insert values: ' + str(oraInserimento))
-        oraInserimento = oraInserimento + timedelta(seconds=1) # per essere sicuro di avere i 5 minuti e non 4 minuti e 99
-        oraInserimento = oraInserimento.replace(second = 0,microsecond = 0) # per avere database pulito
-        logging.info("vedo se l'impianto e' spento")
-        LOCK_SPENTO.acquire()
-        spento = SPENTO.isSet() # variabile locale
-        LOCK_SPENTO.release()
+        insertTime = datetime.now()
+        insertTime = insertTime + timedelta(seconds=1)  # To be sure of having 5 minutes instead of 4:59
+        insertTime = insertTime.replace(second=0, microsecond=0)  # Cleanup seconds and microseconds for clean DB
+        blinkTimes = []
+        while (not QUEUE.empty()):
+            blinkTimes.append(QUEUE.get_nowait())
+        watt = len(blinkTimes)
+        if watt == 0:
+            # If no blinks, then check if more than the timeout passed to send email for PV system turning off
+            if (datetime.now() - lastBlinkTime).seconds > TIMEOUT:
+                wattsProduced = DB_MANAGER.updateDatabase()
+                logging.info('Wh produced: %s', wattsProduced)
+                mail = sendMail(wattsProduced)
+                if (mail != 0):
+                    logging.error('Failed sending email')
+                else:
+                    logging.info('Sent mail')
+                logging.info('Empty instant queue')
+                emptyQueue(QUEUE_IST)
+            # Since it is 0 watts, go to the next loop and wait for more blinks
+            continue
+        lastBlinkTime = blinkTimes[-1]
+        maxPower = 0
+        indexMaxPower = 0
+        for i in range(1, len(blinkTimes)):
+            timeDifference = (blinkTimes[i] - blinkTimes[i-1])  # timedelta between blinks
+            power = 3600/(timeDifference.seconds + timeDifference.microseconds*0.000001)  # microseconds 10^-6
+            if (power > maxPower):
+                maxPower = power
+                indexMaxPower = i
+        maxPowerTime = blinkTimes[indexMaxPower]
+        if (watt == 1 or watt == 2):
+            timeForQuery = lastBlinkTime
+        else:
+            timeForQuery = insertTime
+        insertQuery = 'insert into potenza(GIORNO, ORA, WATT, PICCO_WATT, PICCO_ORA) values ' \
+            "(curdate(),'%s', %d, %d, '%s')" % \
+            (timeForQuery.strftime('%H:%M:%S'), watt, round(maxPower), maxPowerTime.strftime('%H:%M:%S'))
+        logging.debug('Insert data in database')
+        DB_MANAGER.insertDatabase(insertQuery)
 
-    logging.info('Uscito dal while, impianto spento, esco dal thread')
-    return
+    logging.info('PV system is off')
 
 
 def secondsUntilNext5min():
-    oraWakeUp = datetime.now() + timedelta(seconds = 5) # aggiungo secondi per evitare di chimare stesso 5 min
+    oraWakeUp = datetime.now() + timedelta(seconds = 5)  # aggiungo secondi per evitare di chimare stesso 5 min
     # ESEMPIO:
-    # ora = 14:52:00.0 mi darà oraWakeUp = 14:55:00.0 ma poi io farò sleep dei secondi di differenza tra oraWakeUp e adesso, quindi trascuro i microsecondi
-    # quindi quando mi risveglierò, avendo trascurato i microsecondi non saranno le 14:55:00.0 ma tipo 14:54:59.45
-    # quindi se la funzione (insertValues) dura tipo 200 ms, avrò come 'ora inizio' 14:54:59.65 e quindi avrei come wakeup di nuovo 14:55:00.0
-    # per evitare questo, anche se viene di nuovo chiamata alle 14:54:59.65, aggiungo 5 secondi così sono sicuro di cadere nella prossima fascia
+    # ora = 14:52:00.0 mi darà oraWakeUp = 14:55:00.0 ma poi io farò sleep dei secondi di differenza tra oraWakeUp e
+    # adesso, quindi trascuro i microsecondi quindi quando mi risveglierò, avendo trascurato i microsecondi non saranno
+    # le 14:55:00.0 ma tipo 14:54:59.45 quindi se la funzione (insertValues) dura tipo 200 ms, avrò come 'ora inizio'
+    # 14:54:59.65 e quindi avrei come wakeup di nuovo 14:55:00.0 per evitare questo, anche se viene di nuovo chiamata
+    # alle 14:54:59.65, aggiungo 5 secondi così sono sicuro di cadere nella prossima fascia
     secondsToAdd = (4 - oraWakeUp.minute % 5) * 60 + 60 - oraWakeUp.second
-    oraWakeUp = oraWakeUp + timedelta(seconds = secondsToAdd)
-    oraWakeUp = oraWakeUp.replace(microsecond = 0) # azzero i microsecondi
+    oraWakeUp = oraWakeUp + timedelta(seconds=secondsToAdd)
+    oraWakeUp = oraWakeUp.replace(microsecond=0)
     return (oraWakeUp - datetime.now()).seconds
 
 
-def readLED(channel): # parametro voluto da GPIO
-    global QUEUE,QUEUE_IST,LOCK_SPENTO,SPENTO
-    oraLampeggio = datetime.now()
-    logging.info('ReadLED: accesa la luce '+str(oraLampeggio))
-    timeToEnd = oraLampeggio + timedelta(seconds=10)
-# while fino a ora lampeggio + 1 secondo (se gira per più di 10 secondi allora la luce è accesa per un secondo di fila e quindi l'impianto è spento
+def emptyQueue(queue):
+    empty = False
+    while not empty:
+        try:
+            queue.get_nowait()
+        except Empty:
+            empty = True
+
+
+def readLED(channel): # parameter needed by callbacks passed to GPIO
+    global QUEUE, QUEUE_IST
+    blinkTime = datetime.now()
+    logging.info('ReadLED: light turned on: %s', blinkTime)
+    timeToEnd = blinkTime + timedelta(seconds=10)  # 10 seconds timeout to wait for light to turn off (so it blinked)
     while (datetime.now() < timeToEnd):
-        #logging.debug('Before reading light')
         led = LIGHT_READER.isLightOn()
-        #logging.debug('After reading light %s', led)
-    # se LED spento
-        if not led: # perchè è più semplice da leggere, spegnendosi significa che ha lampeggiato
-        # inserisco l'ora nella QUEUE
-            logging.info('spento quindi ha lampeggiato')
-            QUEUE.put_nowait(oraLampeggio)
-            QUEUE_IST.put_nowait(oraLampeggio)
-        # se la queue istantanea ha più di due lampeggi elimino il terzo più vecchio
+        if not led:
+            logging.info('Light turned off, so it blinked')
+            QUEUE.put_nowait(blinkTime)
+            QUEUE_IST.put_nowait(blinkTime)
+            # If queue for instant has more than 2 blink times, remove the oldest (third)
             if (QUEUE_IST.qsize() > 2):
-                QUEUE_IST.get() # elimino il terzo più vecchio (FIFO)
+                QUEUE_IST.get()  # remove oldest (FIFO)
             return
-# se esco dal ciclo allora vuol dire che per un secondo la luce era fissa accesa
-    logging.info('luce rimasta accesa per un secondo, quindi impianto spento')
-    LOCK_SPENTO.acquire()
-    SPENTO.set()
-    LOCK_SPENTO.release()
-    logging.info('esco impianto spento')
-    return
+    logging.error('Light did not turn off after 10 seconds')
 
 
-def manageGPIO(mailSempre=False):
-    logging.info('manage gpio')
-#Impianto acceso?
-    led1 = LIGHT_READER.isLightOn()
-    logging.info('LED: '+str(led1))
-    sleep(1)
-    led2 = LIGHT_READER.isLightOn()
-    logging.info('LED: '+str(led2))
-
-    if (led1 and led2): #se luce accesa significa impianto SPENTO
-        logging.info('Spento')
-        LOCK_SPENTO.acquire()
-        SPENTO.set() #= TRUE
-        LOCK_SPENTO.release()
-    else: #luce spenta, quindi impianto ACCESO
-        logging.info('Acceso')
-        LOCK_SPENTO.acquire()
-        SPENTO.clear() #= FALSE
-        LOCK_SPENTO.release()
-    #setup event detect
-        logging.info('add event')
-        LIGHT_READER.addCallbackLightOn(readLED, BOUNCETIME)
-    #setup insertValues metaGiornata = True
-        logging.info('faccio partire thread insert values')
-        threadInsertValues = Thread(target=insertValues, args=(True,))
-        threadInsertValues.daemon = True #così muore assieme a manageGPIO
-        threadInsertValues.start()
-    #sleep until spento
-        logging.info("aspetto che si spenga l'impianto")
-        SPENTO.wait() #sfrutto l'oggetto EVENT
-    #SPENTO
-        logging.info('SPENTO: sleep(3)')
-        sleep(3) # aspetto che esca da ReadLED
-        logging.info('tolgo interrupt')
-        ## SINCRONIZZARE INSERT VALUES ???
-        LIGHT_READER.removeCallback()
-        logging.info('chiama funzione serale')
-        wattProdotti = DB_MANAGER.updateDatabase()
-        logging.info('Prodotti: '+str(wattProdotti))
-        if mailSempre:
-            mail = inviaMail(wattProdotti)
-            if (mail != 0):
-                logging.info('Errore: Mail NON inviata')
-            else:
-                logging.info('Mail inviata')
-        elif (wattProdotti == 0):
-            mail = inviaMail(wattProdotti)
-            if (mail != 0):
-                logging.info('Errore: Mail NON inviata')
-            else:
-                logging.info('Mail inviata')
-
-#SPENTO
-    while (True):
-    #wait for edge
-        logging.info('Aspetto che si spenga la luce')
-        LIGHT_READER.waitForLightOff()
-    # siamo la mattina dopo ed è ripartito
-        #logging.info('remove event detect' # testing, teoricamente non dovrebbe servire E INVECE
-        LIGHT_READER.removeCallback() # testing, teoricamente non dovrebbe servire E INVECE
-    # set ACCESO
-        logging.info('Luce spenta, impianto acceso')
-        LOCK_SPENTO.acquire()
-        SPENTO.clear() # = FALSE (quindi acceso)
-        LOCK_SPENTO.release()
-    # launch insert values
-        logging.info('faccio partire thread insert values')
-        threadInsertValues = Thread(target=insertValues)
-        threadInsertValues.daemon = True #così muore assieme a manageGPIO
-        threadInsertValues.start() # è lui che fa il primo inserimento
-    #setup event detect
-        logging.info('add event')
-        LIGHT_READER.addCallbackLightOn(readLED, BOUNCETIME)
-    #sleep until spento
-        logging.info("aspetto che si spenga l'impianto")
-        SPENTO.wait() #sfrutto l'oggetto EVENT
-    #SPENTO
-        logging.info('SPENTO: tolgo interrupt')
-        sleep(3) # aspetto che esca da ReadLED
-        ## SINCRONIZZARE INSERT VALUES???
-        LIGHT_READER.removeCallback()
-        logging.info('chiama funzione serale')
-        wattProdotti = DB_MANAGER.updateDatabase()
-        logging.info('Prodotti: '+str(wattProdotti))
-        if mailSempre:
-            mail = inviaMail(wattProdotti)
-            if (mail != 0):
-                logging.info('Errore: Mail NON inviata')
-            else:
-                logging.info('Mail inviata')
-        elif (wattProdotti == 0):
-            mail = inviaMail(wattProdotti)
-            if (mail != 0):
-                logging.info('Errore: Mail NON inviata')
-            else:
-                logging.info('Mail inviata')
-
-
-def inviaMail(wattProdotti):
-    #si potrebbe fare un array di indirizzi mail
+def sendMail(wattProdotti):
     if (wattProdotti != 0):
-        statusForm = subprocess.call('sed s/NNN/'+str(wattProdotti)+'/ < '+HOME+'/PhotoBerry/mail/form > '+HOME+'/PhotoBerry/mail/final', shell=True)
+        statusForm = subprocess.call(
+            'sed s/NNN/'+str(wattProdotti)+'/ < '+HOME+'/PhotoBerry/mail/form > '+HOME+'/PhotoBerry/mail/final',
+            shell=True,
+        )
         statusMail = subprocess.call('ssmtp '+EMAIL+' < '+HOME+'/PhotoBerry/mail/final', shell=True)
     else:
-        statusForm = 0 #nessun errore
+        statusForm = 0  # no error
         statusMail = subprocess.call('ssmtp '+EMAIL+' < '+HOME+'/PhotoBerry/mail/errore', shell=True)
     return 2*statusForm + statusMail
 
@@ -350,8 +229,8 @@ def setup():
         LIGHT_READER = LightReader(CHANNEL)
         DB_MANAGER = db_manager
     else:
-        logging.debug('sleep(secondsUntilNext5min())')
-        sleep(secondsUntilNext5min())
+        # logging.debug('sleep(secondsUntilNext5min())')
+        # sleep(secondsUntilNext5min())
         import testing.db_manager_mock
         from testing.light_reader_mock import LightReaderMock
         LIGHT_READER = LightReaderMock(CHANNEL)
@@ -360,9 +239,10 @@ def setup():
 
 def run():
     try:
+        LIGHT_READER.addCallbackLightOn(readLED, BOUNCETIME)
         threadInstant = Thread(target=instantServer)
         threadInstant.start()
-        manageGPIO(mailSempre=MAILSEMPRE)
+        insertValues()
     except KeyboardInterrupt:
         logging.info('keyboard interrupt')
     finally:

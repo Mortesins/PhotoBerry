@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 ########################################################################
 # Software for collecting data from PV energy meters
 # Copyright (C) 2014 Axel Bernardinis <abernardinis@hotmail.com>
@@ -34,7 +33,7 @@ from urllib.parse import parse_qs, urlparse
 
 from config import HOME, EMAIL
 
-TEST = True
+TEST = False
 
 LOGGING_LEVEL = logging.INFO if not TEST else logging.DEBUG
 LOGGING_FORMAT = '[%(levelname)s %(asctime)s] %(funcName)s: %(message)s'

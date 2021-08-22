@@ -1,6 +1,6 @@
 ########################################################################
 # Software for collecting data from PV energy meters
-# Copyright (C) 2014 Axel Bernardinis <abernardinis@hotmail.com>
+# Copyright (C) 2021 Axel Bernardinis <abernardinis@hotmail.com>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by

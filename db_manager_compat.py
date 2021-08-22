@@ -26,4 +26,12 @@ def insertDatabase(inserimento):
 
 
 def updateDatabase():
-    subprocess.call(['python', BASEPATH + '/updateDatabase.py'])
+    line = subprocess.check_output(['python', BASEPATH + '/updateDatabase.py'], universal_newlines=True)
+    lines = [line for line in line.split('\n') if line]
+    watts = 0
+    for line in lines:
+        if 'Return Watt:' in line:
+            watts = int(line.split(':')[1])
+        else:
+            print(line)
+    return watts

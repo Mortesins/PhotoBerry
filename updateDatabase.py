@@ -19,4 +19,4 @@
 from db_manager import updateDatabase
 
 
-updateDatabase()
+print('Return Watt: %s' % updateDatabase())

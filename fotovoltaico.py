@@ -246,10 +246,10 @@ def setup():
     logging.basicConfig(level=LOGGING_LEVEL, format=LOGGING_FORMAT, datefmt=LOGGING_DATE_FORMAT)
     HTTPD = HTTPServer(RequestHandler.address, RequestHandler)
     if not TEST:
-        import db_manager
+        import db_manager_compat
         from light_reader import LightReader
         LIGHT_READER = LightReader(CHANNEL)
-        DB_MANAGER = db_manager
+        DB_MANAGER = db_manager_compat  # Uses python2
     else:
         # logging.debug('sleep(secondsUntilNext5min())')
         # sleep(secondsUntilNext5min())

@@ -97,9 +97,9 @@ def main():
     blink_manager.addCallbackLightOn(foo, 10)  # Dummy bounce time
     sleep(4.5)
     blink_manager.removeCallback()
-    print(f'{blink_manager.getTimeString()} Before wait')
+    print('%s Before wait' % blink_manager.getTimeString())
     blink_manager.waitForLightOff()
-    print(f'{blink_manager.getTimeString()} After wait')
+    print('%s After wait' % blink_manager.getTimeString())
 
 
 if __name__ == '__main__':

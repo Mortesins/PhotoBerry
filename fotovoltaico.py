@@ -191,11 +191,11 @@ def insertValues():
 def secondsUntilNext5min():
     oraWakeUp = datetime.now() + timedelta(seconds = 5)  # aggiungo secondi per evitare di chimare stesso 5 min
     # ESEMPIO:
-    # ora = 14:52:00.0 mi darà oraWakeUp = 14:55:00.0 ma poi io farò sleep dei secondi di differenza tra oraWakeUp e
-    # adesso, quindi trascuro i microsecondi quindi quando mi risveglierò, avendo trascurato i microsecondi non saranno
-    # le 14:55:00.0 ma tipo 14:54:59.45 quindi se la funzione (insertValues) dura tipo 200 ms, avrò come 'ora inizio'
+    # ora = 14:52:00.0 mi dara' oraWakeUp = 14:55:00.0 ma poi io faro' sleep dei secondi di differenza tra oraWakeUp e
+    # adesso, quindi trascuro i microsecondi quindi quando mi risvegliero', avendo trascurato i microsecondi non saranno
+    # le 14:55:00.0 ma tipo 14:54:59.45 quindi se la funzione (insertValues) dura tipo 200 ms, avro' come 'ora inizio'
     # 14:54:59.65 e quindi avrei come wakeup di nuovo 14:55:00.0 per evitare questo, anche se viene di nuovo chiamata
-    # alle 14:54:59.65, aggiungo 5 secondi così sono sicuro di cadere nella prossima fascia
+    # alle 14:54:59.65, aggiungo 5 secondi cosi' sono sicuro di cadere nella prossima fascia
     secondsToAdd = (4 - oraWakeUp.minute % 5) * 60 + 60 - oraWakeUp.second
     oraWakeUp = oraWakeUp + timedelta(seconds=secondsToAdd)
     oraWakeUp = oraWakeUp.replace(microsecond=0)

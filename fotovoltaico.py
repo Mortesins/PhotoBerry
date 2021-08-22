@@ -37,7 +37,7 @@ from config import HOME, EMAIL
 TEST = True
 
 LOGGING_LEVEL = logging.INFO if not TEST else logging.DEBUG
-LOGGING_FORMAT = '[%(levelname)s %(asctime)s] %(message)s'
+LOGGING_FORMAT = '[%(levelname)s %(asctime)s] %(funcName)s: %(message)s'
 LOGGING_DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
 
 CHANNEL = 16  #GPIO pin for input signal
@@ -47,6 +47,8 @@ DB_MANAGER = None
 TIMEOUT = 360  # If more than 360 seconds between blinks then PV system is off
 
 QUEUE = Queue()
+IS_OFF = Event()
+LOCK_IS_OFF = Lock()
 QUEUE_IST = Queue()
 HTTPD = None  # Server object as global so I can stop it
 ORAULTLAMP = datetime(1970,1,1)  # Last blink time needed for instantaneous power, used by one thread so no lock
@@ -56,30 +58,36 @@ class RequestHandler(BaseHTTPRequestHandler):
     port = 8001
     address = ('', port)
     def do_GET(self):
-        global QUEUE_IST, ORAULTLAMP
+        global QUEUE_IST, ORAULTLAMP, LOCK_IS_OFF
         potenza = 0
-        if (QUEUE_IST.qsize() == 2):
-            logging.debug('Queue size == 2')
-            t1 = QUEUE_IST.get() # sono sicuro ci sono quindi niente timeout
-            t2 = QUEUE_IST.get() # sono sicuro ci sono quindi niente timeout
+        LOCK_IS_OFF.acquire()
+        is_off = IS_OFF.isSet()
+        LOCK_IS_OFF.release()
+        if is_off:
+            potenza = -1
         else:
-            logging.debug('Queue size != 2')
-            try:
-                giaLampeggiato = (ORAULTLAMP.date() == datetime.now().date()) # controlla la data
-            except NameError: # cioe' ORAULTLAMP not defined
-                logging.debug('NameError')
-                giaLampeggiato = False
-            logging.debug('Already blinked: %s', giaLampeggiato)
-            try:
-                if (giaLampeggiato):
-                    t1 = ORAULTLAMP
-                    t2 = QUEUE_IST.get(timeout=TIMEOUT)  # would be 10 watt so PV system is off
-                else: # non ha gia lampeggiato
-                    t1 = QUEUE_IST.get(timeout=TIMEOUT)  # would be 10 watt so PV system is off
-                    t2 = QUEUE_IST.get(timeout=TIMEOUT)  # very unlikely. Maybe not needed?
-            except Empty:
-                logging.debug('Timeout, empty queue')
-                potenza = -1
+            if (QUEUE_IST.qsize() == 2):
+                logging.debug('Queue size == 2')
+                t1 = QUEUE_IST.get() # sono sicuro ci sono quindi niente timeout
+                t2 = QUEUE_IST.get() # sono sicuro ci sono quindi niente timeout
+            else:
+                logging.debug('Queue size != 2')
+                try:
+                    giaLampeggiato = (ORAULTLAMP.date() == datetime.now().date()) # controlla la data
+                except NameError: # cioe' ORAULTLAMP not defined
+                    logging.debug('NameError')
+                    giaLampeggiato = False
+                logging.debug('Already blinked: %s', giaLampeggiato)
+                try:
+                    if (giaLampeggiato):
+                        t1 = ORAULTLAMP
+                        t2 = QUEUE_IST.get(timeout=TIMEOUT)  # would be 10 watt so PV system is off
+                    else: # non ha gia lampeggiato
+                        t1 = QUEUE_IST.get(timeout=TIMEOUT)  # would be 10 watt so PV system is off
+                        t2 = QUEUE_IST.get(timeout=TIMEOUT)  # very unlikely. Maybe not needed?
+                except Empty:
+                    logging.debug('Timeout, empty queue')
+                    potenza = -1
 
         if (potenza != -1):
             timeDifference = t2 - t1
@@ -115,11 +123,14 @@ def instantServer():
 def insertValues():
     global QUEUE
     lastBlinkTime = datetime.now()
-    logging.info('Insert values, just started, so extra wait for next clean 5 minutes')
+    logging.info('Just started, so extra wait for next clean 5 minutes')
     sleep(secondsUntilNext5min())
 
     while True:
-        logging.info('Insert values, wait for next clean 5 minutes')
+        LOCK_IS_OFF.acquire()
+        is_off = IS_OFF.isSet()
+        LOCK_IS_OFF.release()
+        logging.info('Wait for next clean 5 minutes. System: %s', 'OFF' if is_off else 'ON')
         sleep(secondsUntilNext5min())
         insertTime = datetime.now()
         insertTime = insertTime + timedelta(seconds=1)  # To be sure of having 5 minutes instead of 4:59
@@ -129,19 +140,33 @@ def insertValues():
             blinkTimes.append(QUEUE.get_nowait())
         watt = len(blinkTimes)
         if watt == 0:
-            # If no blinks, then check if more than the timeout passed to send email for PV system turning off
-            if (datetime.now() - lastBlinkTime).seconds > TIMEOUT:
-                wattsProduced = DB_MANAGER.updateDatabase()
-                logging.info('Wh produced: %s', wattsProduced)
-                mail = sendMail(wattsProduced)
-                if (mail != 0):
-                    logging.error('Failed sending email')
+            if is_off:
+                logging.debug('PV system was off and no new watts, so go to next loop and wait another 5 minutes')
+            else:
+                if (datetime.now() - lastBlinkTime).seconds > TIMEOUT:
+                    logging.info('PV system is off')
+                    LOCK_IS_OFF.acquire()
+                    IS_OFF.set()  # True
+                    LOCK_IS_OFF.release()
+                    wattsProduced = DB_MANAGER.updateDatabase()
+                    logging.info('Wh produced: %s', wattsProduced)
+                    mail = sendMail(wattsProduced)
+                    if (mail != 0):
+                        logging.error('Failed sending email')
+                    else:
+                        logging.info('Sent mail')
+                    logging.info('Empty instant queue')
+                    emptyQueue(QUEUE_IST)
                 else:
-                    logging.info('Sent mail')
-                logging.info('Empty instant queue')
-                emptyQueue(QUEUE_IST)
+                    logging.debug('PV system on and no new watts, but last blink not older than timeout, so still on')
             # Since it is 0 watts, go to the next loop and wait for more blinks
             continue
+        if is_off:
+            logging.info('PV system back on')
+            LOCK_IS_OFF.acquire()
+            IS_OFF.clear()  # False
+            is_off = IS_OFF.isSet()
+            LOCK_IS_OFF.release()
         lastBlinkTime = blinkTimes[-1]
         maxPower = 0
         indexMaxPower = 0
@@ -159,10 +184,8 @@ def insertValues():
         insertQuery = 'insert into potenza(GIORNO, ORA, WATT, PICCO_WATT, PICCO_ORA) values ' \
             "(curdate(),'%s', %d, %d, '%s')" % \
             (timeForQuery.strftime('%H:%M:%S'), watt, round(maxPower), maxPowerTime.strftime('%H:%M:%S'))
-        logging.debug('Insert data in database')
+        logging.info('Insert 5 minutes data in database')
         DB_MANAGER.insertDatabase(insertQuery)
-
-    logging.info('PV system is off')
 
 
 def secondsUntilNext5min():
@@ -191,7 +214,7 @@ def emptyQueue(queue):
 def readLED(channel): # parameter needed by callbacks passed to GPIO
     global QUEUE, QUEUE_IST
     blinkTime = datetime.now()
-    logging.info('ReadLED: light turned on: %s', blinkTime)
+    logging.info('Light turned on: %s', blinkTime)
     timeToEnd = blinkTime + timedelta(seconds=10)  # 10 seconds timeout to wait for light to turn off (so it blinked)
     while (datetime.now() < timeToEnd):
         led = LIGHT_READER.isLightOn()

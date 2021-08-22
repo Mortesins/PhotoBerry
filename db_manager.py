@@ -52,10 +52,10 @@ def updateDatabase():
             (prodotti)
 
     """
-    logging.info('updateDatabase')
+    logging.info('Connect to database')
     db = MySQLdb.connect(host='localhost', user=USER, passwd=PASSWD, db=DATABASE)
     c = db.cursor()
-    logging.info('connected')
+    logging.info('Connected')
 
     #### nel caso in cui si spegne a mezza giornata e poi riparte, eliminare quelle vecchie
     c.execute('DELETE FROM giornaliero WHERE giorno=curdate()') # numero entries con il giorno di oggi
